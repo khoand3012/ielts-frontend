@@ -1,7 +1,7 @@
 // Writes the backend's OpenAPI schema to types/openapi.json without starting the server.
 // Builds the schema from the FastAPI app object, so no database is needed.
 import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const backendDir = fileURLToPath(new URL("../../ielts-backend", import.meta.url));
@@ -21,5 +21,6 @@ const json = execFileSync(
 );
 
 JSON.parse(json);
+mkdirSync(new URL("../types", import.meta.url), { recursive: true });
 writeFileSync(outFile, json);
 console.log(`wrote ${outFile}`);
