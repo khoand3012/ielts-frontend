@@ -4,7 +4,7 @@ import { NextRequest } from "next/server";
 import { expect, test } from "vitest";
 import { server } from "@/tests/msw/server";
 import { POST as login } from "./login/route";
-import { POST as logout } from "./logout/route";
+import { GET as signOutRedirect, POST as logout } from "./logout/route";
 import { POST as register } from "./register/route";
 
 const B = "http://localhost:8000";
@@ -86,5 +86,17 @@ test("logout clears both cookies even when the backend fails", async () => {
   expect(res.status).toBe(204);
   expect(sent).toEqual({ refresh_token: "ref" });
   expect(res.cookies.get("ielts_access")).toMatchObject({ value: "", maxAge: 0 });
+  expect(res.cookies.get("ielts_refresh")).toMatchObject({ value: "", maxAge: 0 });
+});
+
+test("GET logout clears cookies and redirects to login (used when the backend rejects a session)", async () => {
+  server.use(http.post(`${B}/auth/logout`, () => new HttpResponse(null, { status: 204 })));
+  const res = await signOutRedirect(
+    new NextRequest("http://localhost:3000/api/auth/logout", {
+      headers: { cookie: "ielts_access=acc; ielts_refresh=ref" },
+    }),
+  );
+  expect(res.status).toBe(307);
+  expect(res.headers.get("location")).toBe("http://localhost:3000/login");
   expect(res.cookies.get("ielts_refresh")).toMatchObject({ value: "", maxAge: 0 });
 });
