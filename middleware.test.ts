@@ -81,3 +81,20 @@ test("fresh access token passes through without calling the backend", async () =
   expect(res.headers.get("location")).toBeNull();
   expect(res.cookies.get("ielts_access")).toBeUndefined();
 });
+
+test("a backend outage during refresh keeps the cookies and lets autosave retry", async () => {
+  server.use(http.post(`${B}/auth/refresh`, () => new HttpResponse(null, { status: 503 })));
+  const res = await middleware(get("/api/backend/sessions/s/answers", `ielts_access=${expiring}; ielts_refresh=still-valid`));
+  expect(res.status).toBe(502);
+  expect(await res.json()).toMatchObject({ error: { code: "bad_gateway" } });
+  expect(res.cookies.get("ielts_refresh")).toBeUndefined();
+  expect(res.cookies.get("ielts_access")).toBeUndefined();
+});
+
+test("a backend outage during refresh on a page shows a retry page without signing out", async () => {
+  server.use(http.post(`${B}/auth/refresh`, () => HttpResponse.error()));
+  const res = await middleware(get("/sessions/s", `ielts_refresh=still-valid`));
+  expect(res.status).toBe(503);
+  expect(res.headers.get("location")).toBeNull();
+  expect(res.cookies.get("ielts_refresh")).toBeUndefined();
+});
