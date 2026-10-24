@@ -39,6 +39,7 @@ export function useSessionQuery(id: string, { poll = false }: { poll?: boolean }
       poll && query.state.data?.session.status === "in_progress" ? 10_000 : false,
     // A refetch must not happen behind the student's back mid-test.
     refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: (count, error) => (error.status === 0 || error.status >= 500) && count < 3,
   });
 }

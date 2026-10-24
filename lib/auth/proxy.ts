@@ -33,8 +33,11 @@ export async function proxyToBackend(req: NextRequest, path: string[]): Promise<
 
     const refreshToken = req.cookies.get(REFRESH_COOKIE)?.value;
     if (res.status === 401 && refreshToken) {
-      refreshed = await refreshTokens(refreshToken);
-      if (refreshed) {
+      const result = await refreshTokens(refreshToken);
+      // An outage is not a sign-out: keep the cookies so the client's retry can work.
+      if (result.kind === "unavailable") return unreachable();
+      if (result.kind === "ok") {
+        refreshed = result.pair;
         res = await forward(req, url, body, refreshed.access_token);
       } else {
         refreshFailed = true;

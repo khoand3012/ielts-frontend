@@ -18,7 +18,7 @@ afterEach(() => __resetRefreshCache());
 test("two concurrent calls with the same token make one request", async () => {
   const f = backend();
   const [a, b] = await Promise.all([refreshTokens("r1", f), refreshTokens("r1", f)]);
-  expect(a).toEqual({ access_token: "a2", refresh_token: "r2" });
+  expect(a).toEqual({ kind: "ok", pair: { access_token: "a2", refresh_token: "r2" } });
   expect(b).toEqual(a);
   expect(f).toHaveBeenCalledTimes(1);
   const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
@@ -38,16 +38,23 @@ test("a call within 10 s after settling reuses the result", async () => {
   expect(f).toHaveBeenCalledTimes(2);
 });
 
-test("401 from backend returns null", async () => {
+test("401 from backend means the token was rejected", async () => {
   const f = backend(401, { error: { code: "unauthorized", message: "x" } });
-  await expect(refreshTokens("dead", f)).resolves.toBeNull();
+  await expect(refreshTokens("dead", f)).resolves.toEqual({ kind: "rejected" });
 });
 
-test("network failure returns null", async () => {
+test("network failure means the backend is unavailable, not that the user is signed out", async () => {
   const f = vi.fn(async () => {
     throw new TypeError("fetch failed");
   }) as unknown as typeof fetch;
-  await expect(refreshTokens("r1", f)).resolves.toBeNull();
+  await expect(refreshTokens("r1", f)).resolves.toEqual({ kind: "unavailable" });
+});
+
+test("5xx means unavailable and is not cached", async () => {
+  const f = backend(503, { error: { code: "http_error", message: "down" } });
+  await expect(refreshTokens("r1", f)).resolves.toEqual({ kind: "unavailable" });
+  await refreshTokens("r1", f);
+  expect(f).toHaveBeenCalledTimes(2);
 });
 
 test("different tokens refresh independently", async () => {

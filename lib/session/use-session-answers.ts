@@ -30,16 +30,16 @@ export function useSessionAnswers(session: SessionDetail, handlers: { onClosed()
   // Created and disposed in one effect so StrictMode's mount/unmount/mount
   // leaves a live queue.
   useEffect(() => {
+    const put = (batch: { question: number; value: AnswerValue }[], keepalive = false) =>
+      api.PUT("/sessions/{session_id}/answers", {
+        params: { path: { session_id: sessionId } },
+        body: { answers: batch },
+        keepalive,
+      });
     const queue = new SaveQueue({
-      send: async (batch) =>
-        (
-          await unwrap(
-            api.PUT("/sessions/{session_id}/answers", {
-              params: { path: { session_id: sessionId } },
-              body: { answers: batch },
-            }),
-          )
-        ).answers,
+      send: async (batch) => (await unwrap(put(batch))).answers,
+      // keepalive lets the request outlive the page if the student is leaving the site.
+      sendOnDispose: (batch) => void put(batch, true).catch(() => {}),
       onSaved: (saved) => {
         const accepted: Record<number, AnswerValue> = {};
         for (const [question, value] of Object.entries(saved)) {
@@ -50,7 +50,11 @@ export function useSessionAnswers(session: SessionDetail, handlers: { onClosed()
       onStatus: setStatus,
       onClosed: () => handlersRef.current.onClosed(),
       onRejected: (question, message) =>
-        toast.error(`Answer to question ${question} wasn't saved: ${message}`),
+        toast.error(
+          question === null
+            ? `Some answers weren't saved: ${message}`
+            : `Answer to question ${question} wasn't saved: ${message}`,
+        ),
       onFatal: (error) => {
         if (error.status === 401) {
           router.replace(`/login?next=${encodeURIComponent(window.location.pathname)}`);
@@ -60,7 +64,11 @@ export function useSessionAnswers(session: SessionDetail, handlers: { onClosed()
       },
     });
     queueRef.current = queue;
+    // The retry backoff can be up to 15 s; don't make a student near the deadline wait for it.
+    const onOnline = () => void queue.flush();
+    window.addEventListener("online", onOnline);
     return () => {
+      window.removeEventListener("online", onOnline);
       queue.dispose();
       if (queueRef.current === queue) queueRef.current = null;
     };

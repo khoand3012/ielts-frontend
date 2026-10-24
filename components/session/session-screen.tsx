@@ -48,7 +48,8 @@ export function SessionScreen({ sessionId }: { sessionId: string }) {
     );
   }
 
-  if (query.isError) {
+  // A failed *background* refetch must not take the test away from the student.
+  if (query.isError && !query.data) {
     if (query.error.status === 404) return <Message title="Session not found" />;
     return (
       <Message title="Couldn't load this session">
@@ -69,13 +70,23 @@ export function SessionScreen({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <ReadingScreen
-      session={current}
-      content={parsed.content}
-      offsetMs={offsetMs}
-      expired={expired}
-      onExpire={() => setExpired(true)}
-      onClosed={() => void query.refetch()}
-    />
+    <>
+      {query.isError && (
+        <div role="alert" className="border-b bg-destructive/10 px-4 py-2 text-center text-sm">
+          {"Couldn't refresh this session. "}
+          <button type="button" className="font-medium underline" onClick={() => void query.refetch()}>
+            Try again
+          </button>
+        </div>
+      )}
+      <ReadingScreen
+        session={current}
+        content={parsed.content}
+        offsetMs={offsetMs}
+        expired={expired}
+        onExpire={() => setExpired(true)}
+        onClosed={() => void query.refetch()}
+      />
+    </>
   );
 }

@@ -10,7 +10,9 @@ export function safeNext(next: string | null | undefined): string {
   if (!next || !next.startsWith("/") || /[\x00-\x1f\\]/.test(next)) return FALLBACK;
   try {
     const url = new URL(next, BASE);
-    if (url.origin !== BASE) return FALLBACK;
+    // Dot segments can normalize "/.//evil.com" into "//evil.com", which a
+    // browser would then read as another host.
+    if (url.origin !== BASE || url.pathname.startsWith("//")) return FALLBACK;
     return url.pathname + url.search + url.hash;
   } catch {
     return FALLBACK;

@@ -25,6 +25,7 @@ function setup(sendImpl?: (batch: Batch) => Promise<Record<string, unknown>>) {
     onClosed: vi.fn(),
     onRejected: vi.fn(),
     onFatal: vi.fn(),
+    sendOnDispose: vi.fn(),
   };
   const send = vi.fn(async (batch: Batch) => {
     calls.push(batch);
@@ -249,4 +250,67 @@ test("dispose stops timers and ignores late responses", async () => {
   await vi.advanceTimersByTimeAsync(5000);
   expect(onSaved).not.toHaveBeenCalled();
   expect(calls).toHaveLength(1);
+});
+
+test("dispose hands unsent edits to sendOnDispose", async () => {
+  const d = deferred<Record<string, unknown>>();
+  const { queue, sendOnDispose } = setup(() => d.promise);
+  queue.set(1, ["A"], { debounce: false });
+  await vi.advanceTimersByTimeAsync(0);
+  queue.set(8, "moss", { debounce: true });
+  queue.set(1, ["B"], { debounce: false });
+  queue.dispose();
+  // Waits for the request in flight, so the older ["A"] can't land after ["B"].
+  expect(sendOnDispose).not.toHaveBeenCalled();
+  d.resolve({ "1": ["A"] });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(sendOnDispose).toHaveBeenCalledWith([
+    { question: 8, value: "moss" },
+    { question: 1, value: ["B"] },
+  ]);
+});
+
+test("dispose also resends an in-flight batch that then fails", async () => {
+  const d = deferred<Record<string, unknown>>();
+  const { queue, sendOnDispose } = setup(() => d.promise);
+  queue.set(1, ["A"], { debounce: false });
+  await vi.advanceTimersByTimeAsync(0);
+  queue.dispose();
+  d.reject(new TypeError("fetch failed"));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(sendOnDispose).toHaveBeenCalledWith([{ question: 1, value: ["A"] }]);
+});
+
+test("dispose with nothing unsent, or after the session closed, sends nothing", async () => {
+  const idle = setup();
+  idle.queue.dispose();
+  expect(idle.sendOnDispose).not.toHaveBeenCalled();
+
+  const closed = setup(async () => {
+    throw new ApiError(409, "session_closed", "closed");
+  });
+  closed.queue.set(1, ["A"], { debounce: false });
+  await vi.advanceTimersByTimeAsync(0);
+  closed.queue.set(2, ["B"], { debounce: false });
+  closed.queue.dispose();
+  expect(closed.sendOnDispose).not.toHaveBeenCalled();
+});
+
+test("a 422 that names no question drops the batch and keeps autosave running", async () => {
+  let n = 0;
+  const { queue, calls, onRejected, onFatal, statuses } = setup(async (batch) => {
+    n += 1;
+    if (n === 1) throw new ApiError(422, "validation_error", "Invalid answer");
+    return Object.fromEntries(batch.map((a) => [String(a.question), a.value]));
+  });
+  queue.set(1, "bad", { debounce: false });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(onRejected).toHaveBeenCalledWith(null, "Invalid answer");
+  expect(onFatal).not.toHaveBeenCalled();
+  expect(statuses.at(-1)).toBe("saved");
+
+  queue.set(2, "ok", { debounce: false });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(calls).toHaveLength(2);
+  expect(calls[1]).toEqual([{ question: 2, value: "ok" }]);
 });

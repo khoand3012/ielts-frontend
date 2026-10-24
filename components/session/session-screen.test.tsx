@@ -206,3 +206,23 @@ test("an unknown session shows not found", async () => {
   renderWithProviders(<SessionScreen sessionId="s-1" />);
   expect(await screen.findByText("Session not found")).toBeInTheDocument();
 });
+
+test("a failed background refetch keeps the test on screen", async () => {
+  backend([makeSession()], { put: closed });
+  let gets = 0;
+  server.use(
+    http.get(BASE, () => {
+      gets += 1;
+      if (gets === 1) return HttpResponse.json(makeSession());
+      return HttpResponse.json({ error: { code: "not_found", message: "x", extra: {} } }, { status: 404 });
+    }),
+  );
+  const user = userEvent.setup();
+  renderWithProviders(<SessionScreen sessionId="s-1" />);
+  const q1 = await screen.findByRole("radiogroup", { name: "Question 1" });
+  await user.click(within(q1).getByRole("radio", { name: "TRUE" }));
+  expect(await screen.findByText(/Couldn't refresh this session/)).toBeInTheDocument();
+  expect(gets).toBe(2);
+  expect(screen.getByRole("radiogroup", { name: "Question 1" })).toBeInTheDocument();
+  expect(screen.queryByText("Session not found")).not.toBeInTheDocument();
+});

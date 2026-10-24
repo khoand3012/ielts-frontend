@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { unreachable } from "@/lib/auth/backend";
 import { ACCESS_COOKIE, clearAuthCookies, REFRESH_COOKIE, setAuthCookies } from "@/lib/auth/cookies";
 import { isExpiringSoon } from "@/lib/auth/jwt";
 import { refreshTokens } from "@/lib/auth/refresh";
@@ -17,6 +18,15 @@ function signedOut(req: NextRequest): NextResponse {
   return NextResponse.redirect(login);
 }
 
+/** The backend could not be reached to refresh: keep the cookies so a retry can work. */
+function unavailable(req: NextRequest): NextResponse {
+  if (req.nextUrl.pathname.startsWith("/api/backend/")) return unreachable();
+  return new NextResponse("The server is unreachable right now. Reload the page in a moment.", {
+    status: 503,
+    headers: { "content-type": "text/plain; charset=utf-8", "retry-after": "5" },
+  });
+}
+
 /**
  * Keeps the access token fresh *before* anything renders. Server Components
  * cannot set cookies, and refresh tokens rotate, so this is the only safe place
@@ -32,12 +42,14 @@ export async function middleware(req: NextRequest) {
   if (!refreshToken) return signedOut(req);
   if (!isExpiringSoon(req.cookies.get(ACCESS_COOKIE)?.value)) return NextResponse.next();
 
-  const pair = await refreshTokens(refreshToken);
-  if (!pair) {
+  const result = await refreshTokens(refreshToken);
+  if (result.kind === "unavailable") return unavailable(req);
+  if (result.kind === "rejected") {
     const out = signedOut(req);
     clearAuthCookies(out.cookies);
     return out;
   }
+  const { pair } = result;
 
   // Rewrite the incoming request's cookies so this render sees the new token…
   req.cookies.set(ACCESS_COOKIE, pair.access_token);

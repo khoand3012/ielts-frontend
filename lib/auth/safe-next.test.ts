@@ -18,3 +18,9 @@ test("rejects anything that could leave the site", () => {
     expect(safeNext(bad)).toBe("/tests");
   }
 });
+
+test("rejects dot segments that normalize to a protocol-relative URL", () => {
+  for (const bad of ["/.//evil.com", "/..//evil.com", "/a/..//evil.com", "/%2e//evil.com"]) {
+    expect(safeNext(bad)).toBe("/tests");
+  }
+});

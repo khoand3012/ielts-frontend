@@ -12,10 +12,12 @@ export interface SaveQueueOptions {
   onStatus(status: SaveStatus): void;
   /** 409 session_closed: the server has submitted the session. */
   onClosed(): void;
-  /** 422 naming one question: that answer was dropped. */
-  onRejected(question: number, message: string): void;
-  /** Any other 4xx (401/403/404, or a 422 that names no question). */
+  /** 422: the named answer was dropped, or the whole batch when `question` is null. */
+  onRejected(question: number | null, message: string): void;
+  /** Any other 4xx (401/403/404). */
   onFatal(error: ApiError): void;
+  /** Best-effort send of unsent edits when the queue is disposed (the student left). */
+  sendOnDispose?(answers: Batch): void;
   debounceMs?: number;
 }
 
@@ -100,8 +102,17 @@ export class SaveQueue {
   }
 
   dispose(): void {
+    if (this.disposed) return;
     this.disposed = true;
     this.clearTimers();
+    // Wait for the request in flight so its older values can't land after ours.
+    if (this.inflightPromise) void this.inflightPromise.then(() => this.sendUnsent());
+    else this.sendUnsent();
+  }
+
+  private sendUnsent() {
+    if (this.closed || this.failed || this.pending.size === 0) return;
+    this.opts.sendOnDispose?.([...this.pending].map(([question, value]) => ({ question, value })));
   }
 
   private clearTimers() {
@@ -159,7 +170,12 @@ export class SaveQueue {
   private onError(batch: Map<number, AnswerValue>, err: unknown) {
     this.inflight = null;
     this.inflightPromise = null;
-    if (this.disposed) return;
+    if (this.disposed) {
+      // Keep a failed batch for dispose's last send; a closed session takes nothing more.
+      if (isTransient(err)) this.restore(batch);
+      else if (err instanceof ApiError && err.status === 409) this.closed = true;
+      return;
+    }
 
     if (isTransient(err)) {
       this.lastAttemptFailed = true;
@@ -185,11 +201,16 @@ export class SaveQueue {
       return;
     }
 
-    const rejected = apiErr.extra.question;
-    if (apiErr.status === 422 && typeof rejected === "number" && batch.has(rejected)) {
-      batch.delete(rejected);
-      this.restore(batch);
-      this.opts.onRejected(rejected, apiErr.message);
+    if (apiErr.status === 422) {
+      const rejected = apiErr.extra.question;
+      if (typeof rejected === "number" && batch.has(rejected)) {
+        batch.delete(rejected);
+        this.restore(batch);
+        this.opts.onRejected(rejected, apiErr.message);
+      } else {
+        // We can't tell which answer was bad, so drop this batch and keep going.
+        this.opts.onRejected(null, apiErr.message);
+      }
       this.startSend();
       this.updateStatus();
       return;

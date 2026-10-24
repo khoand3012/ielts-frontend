@@ -100,3 +100,16 @@ test("a retry that also returns 401 does not loop", async () => {
   expect(res.status).toBe(401);
   expect(hits).toBe(2);
 });
+
+test("a backend outage during refresh returns 502 and keeps the cookies", async () => {
+  server.use(
+    http.get(`${B}/tests`, () =>
+      HttpResponse.json({ error: { code: "unauthorized", message: "x" } }, { status: 401 }),
+    ),
+    http.post(`${B}/auth/refresh`, () => new HttpResponse(null, { status: 502 })),
+  );
+  const res = await proxyToBackend(req("GET", "/tests"), ["tests"]);
+  expect(res.status).toBe(502);
+  expect(res.cookies.get("ielts_access")).toBeUndefined();
+  expect(res.cookies.get("ielts_refresh")).toBeUndefined();
+});
