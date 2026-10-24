@@ -53,3 +53,6 @@ The backend lives at `../ielts-backend` (Python + FastAPI, one in-process app �
 - Verify endpoints against the FastAPI OpenAPI spec at `http://localhost:8000/docs` (or `types/openapi.json`) before wiring up new screens
 - Speaking recording: test MediaRecorder mime type fallbacks (Safari uses `audio/mp4`, Chrome/Firefox use `audio/webm`)
 - Time limits are enforced server-side — do not trust client timers for submission gating
+- Fonts: `next/font` variable classes go on `<html>` (shadcn applies `font-sans` there); `globals.css` maps `--font-sans` to `--font-geist-sans`
+- The backend's email validator rejects reserved domains (`.test`, `.example`, …) — use a normal-looking domain for test accounts
+- In the desktop app's preview pane, a hidden pane never fires `requestAnimationFrame`, so streamed Suspense content (pages with `loading.tsx`) stays hidden; check with curl or bring the pane forward
