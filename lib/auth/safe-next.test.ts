@@ -6,6 +6,13 @@ test("keeps same-site relative paths", () => {
   expect(safeNext("/tests?skill=reading")).toBe("/tests?skill=reading");
 });
 
+test("rejects paths that browsers normalize into another origin", () => {
+  // URL parsers strip tabs and newlines, so "/\t/evil.com" becomes "//evil.com".
+  for (const bad of ["/\t/evil.com", "/\n/evil.com", "/\r//evil.com", "/\\/evil.com"]) {
+    expect(safeNext(bad)).toBe("/tests");
+  }
+});
+
 test("rejects anything that could leave the site", () => {
   for (const bad of ["//evil.com", "https://evil.com", "/\\evil.com", "evil", "", null, undefined]) {
     expect(safeNext(bad)).toBe("/tests");
