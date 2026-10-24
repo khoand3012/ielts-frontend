@@ -1,36 +1,118 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# IELTS Practice — Frontend
 
-## Getting Started
+Web frontend for an IELTS practice platform. Students take Reading, Listening, Writing and Speaking tests. Reading and Listening are graded automatically, Writing gets AI feedback (or a teacher's, on request), and Speaking is graded by a teacher.
 
-First, run the development server:
+This repo is the Next.js app. The REST API lives in a separate repo, `ielts-backend` (Python + FastAPI), which this app expects to find next to it at `../ielts-backend`.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Status
+
+**Milestone 1 is done:** sign-up and sign-in, the test list, and the full Reading session.
+
+| Area | Status |
+| --- | --- |
+| Register, sign in, sign out | ✅ |
+| Test list with skill filter, practice or exam mode | ✅ |
+| Reading session: passages, all question types, autosave, resume, countdown, submit | ✅ |
+| My sessions (`/sessions`) | ✅ |
+| Listening, Writing, Speaking sessions | Not built yet |
+| Results page and progress dashboard | Not built yet |
+
+## Getting started
+
+You need Node.js 20 or later (it's developed on 24) and a running backend.
+
+1. Start the backend from `../ielts-backend`. See that repo for database setup.
+
+   ```bash
+   uv run uvicorn api.main:app --port 8000
+   ```
+
+2. Install dependencies and point the app at the backend:
+
+   ```bash
+   npm install
+   cp .env.example .env.local
+   ```
+
+   `.env.local` sets `BACKEND_URL`, which defaults to `http://localhost:8000`.
+
+3. Run the dev server, then open http://localhost:3000 and register an account.
+
+   ```bash
+   npm run dev
+   ```
+
+The backend's email validator rejects reserved domains such as `.test` and `.example`, so register with a normal-looking address.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Dev server on port 3000 |
+| `npm run build` / `npm start` | Production build and server |
+| `npm test` | Vitest suite; use `npm run test:watch` for watch mode |
+| `npm run lint` | ESLint |
+| `npx tsc --noEmit` | Typecheck |
+| `npm run api:snapshot` | Writes the backend's OpenAPI schema to `types/openapi.json` (runs `../ielts-backend` through `uv`; no database needed) |
+| `npm run gen:api` | Generates `types/api.ts` from that snapshot |
+
+## How it works
+
+### Auth
+
+The browser only talks to Next.js; it never calls the backend directly.
+
+- **Login, register and logout:** `app/api/auth/*` calls the backend and stores the JWT access and refresh tokens in httpOnly cookies.
+- **Every other API call:** goes to `app/api/backend/[...path]`, which forwards it to the backend with the access token. On a 401 the proxy refreshes the token and retries once.
+- **Before a page renders:** `middleware.ts` refreshes an access token that is about to expire, because Server Components cannot set cookies. Refresh tokens rotate, so requests that arrive together share a single refresh.
+- **If the backend is down during a refresh:** the user stays signed in and gets a "try again" response.
+
+### Taking a test
+
+1. The student starts a test from `/tests`, which opens `/sessions/[sessionId]`. Reopening that URL resumes the session.
+2. Answers autosave as the student works.
+   - Text answers wait 500 ms after the last keystroke.
+   - Only one save request runs at a time; edits made meanwhile go in the next one.
+   - Network errors and 5xx responses are retried with backoff (1, 2, 4, 8, then every 15 s). Coming back online saves straight away.
+3. Time limits are enforced by the server. The countdown is display-only and is synced to the server clock.
+4. On submit, unsaved answers are saved first, then the app calls `POST /sessions/{id}/submit`.
+
+## Project layout
+
+```
+app/                 Routes (App Router)
+  (auth)/            /login, /register
+  (app)/             Signed-in pages: /tests, /sessions, /sessions/[sessionId]
+  api/auth/          Login, register and logout route handlers (set cookies)
+  api/backend/       Catch-all proxy to the backend
+components/          UI: auth forms, test list, question groups, session screen, shadcn/ui
+lib/
+  api/               Typed API clients (browser and server) and error handling
+  auth/              Cookies, token refresh, proxy, safe redirects
+  content/           Zod schemas for test content (untyped in OpenAPI)
+  answers/           Answer values and the autosave queue
+  session/           Session queries, server-clock sync, answer state hook
+middleware.ts        Refreshes the access token before rendering
+types/               OpenAPI snapshot and generated types
+tests/               Test setup, MSW server, fixtures, helpers
+docs/                Implementation plans
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Tech stack
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **App:** Next.js 15.5 (App Router), TypeScript in strict mode
+- **UI:** Tailwind CSS v4 and shadcn/ui (Radix)
+- **Data:** TanStack Query for server state, React Hook Form + Zod for forms
+- **API:** `openapi-fetch` with types generated by `openapi-typescript`
+- **Tests:** Vitest, React Testing Library and MSW
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Next.js is pinned to 15, because version 16 renames `middleware.ts` to `proxy.ts`.
 
-## Learn More
+## Conventions
 
-To learn more about Next.js, take a look at the following resources:
+- Use React Server Components by default; add `"use client"` only for interactivity, browser APIs or hooks.
+- Make every API call through `lib/api/`; components never call `fetch` directly.
+- Don't use barrel (`index.ts`) files.
+- Prefer Tailwind utility classes. Extract repeated patterns into components or `cn()` helpers, not `@apply`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See [CLAUDE.md](CLAUDE.md) for more detail.
